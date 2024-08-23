@@ -27,6 +27,10 @@ Node_Tag :: enum {
 	stmt_return,
 	// main_token -> actual value
 	exp_integer,
+	// main_token -> operator, lhs -> operand (exp)
+	exp_negate_op,
+	// main_token -> operator, lhs -> operand (exp)
+	exp_complement_op,
 	// main_token -> actual value
 	identifier,
 }
@@ -77,6 +81,7 @@ parse_root :: proc(p: ^Parser) {
 
 	// node 0 is the root
 	p.nodes[0].lhs = function
+	parser_expect_token(p, .eof)
 }
 
 parse_function :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
@@ -137,6 +142,9 @@ parse_return_stmt :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
 }
 
 parse_expression :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
+    token := parser_peek_token(p)
+
+
 	tokenIdx := parser_expect_token(p, .constant) or_return
 	result = parser_append_node(p, Node{tag = .exp_integer, main_token = tokenIdx})
 

@@ -1,8 +1,8 @@
 package main
 import "core:fmt"
+import "core:io"
 import "core:os"
 import "core:path/filepath"
-import "core:io"
 
 
 main :: proc() {
@@ -35,6 +35,10 @@ main :: proc() {
 		for {
 			token := lexer_next_token(&lexer)
 			if (token.tag == .eof) do break
+			if (token.tag == .invalid) {
+				fmt.eprintfln("invalid token: %s", src[token.start:token.end])
+				os.exit(42)
+			}
 
 			fmt.printfln(".%s: %s", token.tag, src[token.start:token.end])
 		}
@@ -43,7 +47,9 @@ main :: proc() {
 
 	if (command == .parse) {
 		ast := parse(string(src))
+		handle_parse_errors(ast)
 		defer ast_deinit(&ast)
+
 
 		s := ast_render(ast)
 		defer delete(s)
@@ -55,6 +61,7 @@ main :: proc() {
 	// code_gen and emit the .s file
 	ast := parse(string(src))
 	defer ast_deinit(&ast)
+	handle_parse_errors(ast)
 
 	assem := asm_generate(&ast)
 	defer asm_deinit(&assem)
@@ -64,8 +71,10 @@ main :: proc() {
 		stream = os.stream_from_handle(os.stdout)
 		asm_emit(stream, assem)
 	} else {
-		stem := filepath.short_stem(input_name)
-		outputfile_name := fmt.tprintf("%s.s", stem)
+		stem := filepath.stem(input_name)
+		dir := filepath.dir(input_name)
+		outputfile_name := fmt.tprintf("%s/%s.s", dir, stem)
+		fmt.println(outputfile_name)
 		output_fd, err := os.open(outputfile_name, os.O_RDWR | os.O_CREATE, 0o666)
 		if err != 0 {
 			fmt.println("Error creating file:", err)
@@ -83,6 +92,16 @@ Command :: enum {
 	parse,
 	code_gen,
 	none,
+}
+
+handle_parse_errors :: proc(ast: Ast) {
+	if (len(ast.errors) > 0) {
+		for error in ast.errors {
+			err_token := ast.tokens[error.token]
+			fmt.eprintfln("error: %s at token '%s'", error.tag, ast.src[err_token.start:err_token.end])
+		}
+		os.exit(2)
+	}
 }
 
 parse_arg_commands :: proc(args: []string) -> (Command, bool) {

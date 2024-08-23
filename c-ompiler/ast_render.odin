@@ -19,7 +19,7 @@ ast_render_root :: proc(ast: Ast, sb: ^strings.Builder) {
 
 ast_render_element :: proc(ast: Ast, node_idx: Node_Idx, indentation: int, sb: ^strings.Builder) {
 	node := ast.nodes[node_idx]
-	switch (node.tag) {
+	#partial switch (node.tag) {
 	// lhs -> function element
 	case .root: // Unreachable
 	// lhs -> indentifier, rhs -> body

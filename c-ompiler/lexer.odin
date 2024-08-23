@@ -10,6 +10,9 @@ Token_Tag :: enum {
 	l_brace,
 	r_brace,
 	semicolon,
+	tilde,
+	minus,
+	minus_minus,
 	identifier,
 	keyword_void,
 	keyword_return,
@@ -44,6 +47,7 @@ lexer_next_token :: proc(l: ^Lexer) -> Token {
 	State :: enum {
 		start,
 		identifier,
+		minus,
 		constant,
 	}
 
@@ -79,6 +83,13 @@ lexer_next_token :: proc(l: ^Lexer) -> Token {
 				result.tag = .r_brace
 				l.idx += 1
 				break loop
+			case '~':
+				result.tag = .tilde
+				l.idx += 1
+				break loop
+			case '-':
+				state = .minus
+				result.tag = .minus
 			case 'a' ..= 'z', 'A' ..= 'Z', '_':
 				state = .identifier
 				result.tag = .identifier
@@ -88,8 +99,10 @@ lexer_next_token :: proc(l: ^Lexer) -> Token {
 			case:
 				result.tag = .invalid
 				result.end = l.idx
+				l.idx = len(l.src)
 				return result
 			}
+
 		case .identifier:
 			switch (c) {
 			case '0' ..= '9', 'a' ..= 'z', 'A' ..= 'Z', '_':
@@ -101,10 +114,23 @@ lexer_next_token :: proc(l: ^Lexer) -> Token {
 				}
 				break loop
 			}
+
 		case .constant:
 			switch (c) {
 			case '0' ..= '9':
 				continue
+			case 'a' ..= 'z', 'A' ..= 'Z', '_':
+				result.tag = .invalid
+			case:
+				break loop
+			}
+
+		case .minus:
+			switch (c) {
+			case '-':
+				result.tag = .minus_minus
+				l.idx += 1
+				break loop
 			case:
 				break loop
 			}
@@ -133,6 +159,7 @@ lexer_test :: proc(t: ^testing.T) {
 		for expected_tag in expected {
 			token := lexer_next_token(&lexer)
 			testing.expect_value(t, token.tag, expected_tag)
+			if (token.tag == .invalid) do break
 		}
 
 		// Last element should always be eof
@@ -147,6 +174,32 @@ lexer_test :: proc(t: ^testing.T) {
 		[]Token_Tag{.l_brace, .l_paren, .r_paren, .r_brace, .semicolon},
 	)
 
+	src = "`"
+	test_lexer(
+		t,
+		transmute([]u8)src,
+		[]Token_Tag{.invalid},
+	)
+
+	src = "-2 --2 -~2 ~2 ~~2"
+	test_lexer(
+		t,
+		transmute([]u8)src,
+		[]Token_Tag {
+			.minus,
+			.constant,
+			.minus_minus,
+			.constant,
+			.minus,
+			.tilde,
+			.constant,
+			.tilde,
+			.constant,
+			.tilde,
+			.tilde,
+			.constant,
+		},
+	)
 	src = "main other"
 	test_lexer(t, transmute([]u8)src, []Token_Tag{.identifier, .identifier})
 
@@ -175,6 +228,15 @@ lexer_test :: proc(t: ^testing.T) {
 			.constant,
 			.semicolon,
 			.r_brace,
+		},
+	)
+
+	src = "1foo"
+	test_lexer(
+		t,
+		transmute([]u8)src,
+		[]Token_Tag {
+		  .invalid,
 		},
 	)
 }
