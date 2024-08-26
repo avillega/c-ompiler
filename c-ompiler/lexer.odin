@@ -12,6 +12,10 @@ Token_Tag :: enum {
 	semicolon,
 	tilde,
 	minus,
+	plus,
+	star,
+	slash,
+	percent,
 	minus_minus,
 	identifier,
 	keyword_void,
@@ -85,6 +89,22 @@ lexer_next_token :: proc(l: ^Lexer) -> Token {
 				break loop
 			case '~':
 				result.tag = .tilde
+				l.idx += 1
+				break loop
+			case '+':
+				result.tag = .plus
+				l.idx += 1
+				break loop
+			case '*':
+				result.tag = .star
+				l.idx += 1
+				break loop
+			case '/':
+				result.tag = .slash
+				l.idx += 1
+				break loop
+			case '%':
+				result.tag = .percent
 				l.idx += 1
 				break loop
 			case '-':
@@ -167,19 +187,11 @@ lexer_test :: proc(t: ^testing.T) {
 		testing.expect_value(t, eof.tag, Token_Tag.eof)
 	}
 
-	src: string = " { ( ) } ; "
-	test_lexer(
-		t,
-		src,
-		[]Token_Tag{.l_brace, .l_paren, .r_paren, .r_brace, .semicolon},
-	)
+	src: string = " { ( ) } ; - + * / % "
+	test_lexer(t, src, []Token_Tag{.l_brace, .l_paren, .r_paren, .r_brace, .semicolon, .minus, .plus, .star, .slash, .percent})
 
 	src = "`"
-	test_lexer(
-		t,
-		src,
-		[]Token_Tag{.invalid},
-	)
+	test_lexer(t, src, []Token_Tag{.invalid})
 
 	src = "-2 --2 -~2 ~2 ~~2"
 	test_lexer(
@@ -207,11 +219,7 @@ lexer_test :: proc(t: ^testing.T) {
 	test_lexer(t, src, []Token_Tag{.l_brace, .identifier, .r_brace})
 
 	src = "void return int main"
-	test_lexer(
-		t,
-		src,
-		[]Token_Tag{.keyword_void, .keyword_return, .keyword_int, .identifier},
-	)
+	test_lexer(t, src, []Token_Tag{.keyword_void, .keyword_return, .keyword_int, .identifier})
 
 	src = "int main(void) { return 2; }"
 	test_lexer(
@@ -232,11 +240,5 @@ lexer_test :: proc(t: ^testing.T) {
 	)
 
 	src = "1foo"
-	test_lexer(
-		t,
-		src,
-		[]Token_Tag {
-		  .invalid,
-		},
-	)
+	test_lexer(t, src, []Token_Tag{.invalid})
 }

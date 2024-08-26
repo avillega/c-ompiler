@@ -176,10 +176,15 @@ asm_generator_test :: proc(t: ^testing.T) {
 	defer bytes.buffer_destroy(&buffer)
 	asm_emit(bytes.buffer_to_stream(&buffer), assem)
 
-	expected: string = `.globl _main
+	expected: string = `    .globl _main
 _main:
-movl $2, %eax
-ret
+    pushq %rbp
+    movq  %rsp, %rbp
+    subq  $0, %rsp
+    movl  $2, %eax
+    movq  %rbp, %rsp
+    popq  %rbp
+    ret
 `
 	testing.expect_value(t, bytes.buffer_to_string(&buffer), expected)
 }
