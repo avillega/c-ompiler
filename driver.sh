@@ -4,6 +4,7 @@
 LEX=false
 PARSE=false
 CODE_GEN=false
+TACKY=false
 INPUT_FILE=""
 
 # Function to print usage
@@ -24,8 +25,12 @@ while [[ $# -gt 0 ]]; do
             PARSE=true
             shift
             ;;
-        --code_gen)
+        --codegen)
             CODE_GEN=true
+            shift
+            ;;
+        --tacky)
+            TACKY=true
             shift
             ;;
         *)
@@ -71,6 +76,9 @@ if $PARSE; then
 fi
 if $CODE_GEN; then
     C_OMPILER_FLAGS="$C_OMPILER_FLAGS --code_gen"
+fi
+if $TACKY; then
+    C_OMPILER_FLAGS="$C_OMPILER_FLAGS --tacky"
 fi
 
 "$HOME/code/c-ompiler/c-ompiler.bin" "$PREPROCESSED_FILE" $C_OMPILER_FLAGS

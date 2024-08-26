@@ -11,9 +11,9 @@ Ast :: struct {
 }
 
 ast_deinit :: proc(ast: ^Ast) {
-    delete(ast.tokens)
-    delete(ast.nodes)
-    delete(ast.errors)
+	delete(ast.tokens)
+	delete(ast.nodes)
+	delete(ast.errors)
 }
 
 Node_Idx :: int
@@ -51,11 +51,11 @@ Parser :: struct {
 	errors: [dynamic]Compile_Error,
 }
 
-parse :: proc(src: string) -> Ast {
+parse :: proc(src: string) -> (ast: Ast, ok: bool) {
 	tokens := make([dynamic]Token)
 
 	lexer := Lexer {
-		src = transmute([]u8)src,
+		src = src,
 	}
 
 	for {
@@ -70,18 +70,19 @@ parse :: proc(src: string) -> Ast {
 		errors = make([dynamic]Compile_Error),
 	}
 
-	parse_root(&parser)
-	return Ast{src = src, tokens = tokens[:], nodes = parser.nodes[:], errors = parser.errors[:]}
+	parse_root(&parser) or_return
+	return Ast{src = src, tokens = tokens[:], nodes = parser.nodes[:], errors = parser.errors[:]}, len(parser.errors) == 0
 }
 
-parse_root :: proc(p: ^Parser) {
+parse_root :: proc(p: ^Parser) -> (ok: bool) {
 	append(&p.nodes, Node{tag = .root, main_token = 0, lhs = -1, rhs = -1})
 
-	function, ok := parse_function(p)
+	function := parse_function(p) or_return
 
 	// node 0 is the root
 	p.nodes[0].lhs = function
-	parser_expect_token(p, .eof)
+	parser_expect_token(p, .eof) or_return
+	return true
 }
 
 parse_function :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
@@ -142,17 +143,32 @@ parse_return_stmt :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
 }
 
 parse_expression :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
-    token := parser_peek_token(p)
+	token, token_idx := parser_next_token(p)
 
+	#partial switch (token.tag) {
+	case .constant:
+		result = parser_append_node(p, Node{tag = .exp_integer, main_token = token_idx})
+		return result, true
+	case .l_paren:
+		inner_exp := parse_expression(p) or_return
+		parser_expect_token(p, .r_paren) or_return
+		return inner_exp, true
+	case .tilde, .minus:
+		tag: Node_Tag = token.tag == .tilde ? .exp_complement_op : .exp_negate_op
+		result = parser_append_node(p, Node{tag = tag, main_token = token_idx})
+		operand := parse_expression(p) or_return
+		p.nodes[result].lhs = operand
+		return result, true
+	case:
+		parser_fail(p) or_return
+	}
 
-	tokenIdx := parser_expect_token(p, .constant) or_return
-	result = parser_append_node(p, Node{tag = .exp_integer, main_token = tokenIdx})
-
-	return result, true
+	assert(false, "unreachable in parse_expression")
+	return result, false
 }
 
 parser_fail :: proc(p: ^Parser) -> (ok: bool) {
-	append(&p.errors, Compile_Error{tag = .unexpected_token, token = p.t_idx - 1})
+	append(&p.errors, Compile_Error{tag = .unexpected_token, token = p.tokens[p.t_idx - 1]})
 	return false
 }
 
@@ -167,22 +183,24 @@ parser_expect_token :: proc(p: ^Parser, token_tag: Token_Tag) -> (result: Token_
 	p.t_idx += 1
 
 	if (p.tokens[result].tag != token_tag) {
-		append(&p.errors, Compile_Error{tag = .unexpected_token, token = p.t_idx - 1})
+		append(&p.errors, Compile_Error{tag = .unexpected_token, token = p.tokens[p.t_idx - 1]})
 		return -1, false
 	}
 
 	return result, true
 }
 
+/// Returns the current token and its corresponding index
+/// and moves the cursor to the next token
 @(private)
-parser_next_token :: proc(p: ^Parser) -> Token {
+parser_next_token :: proc(p: ^Parser) -> (Token, Token_Idx) {
 	if (p.t_idx < len(p.tokens)) {
 		result := p.tokens[p.t_idx]
 		p.t_idx += 1
-		return result
+		return result, p.t_idx - 1
 	}
 
-	return p.tokens[len(p.tokens) - 1]
+	return p.tokens[len(p.tokens) - 1], len(p.tokens) - 1
 }
 
 @(private)
@@ -197,23 +215,24 @@ parser_peek_token :: proc(p: ^Parser) -> Token {
 
 @(test)
 parser_test :: proc(t: ^testing.T) {
-	src := "int main(void) { return 2; }"
-	ast := parse(src)
+	src := "int main(void) { return ~(-2); }"
+	ast, ok := parse(src)
+	testing.expect(t, ok, "Exptected parser to succed")
 	defer delete(ast.tokens)
 	defer delete(ast.nodes)
-
-	expected_ast := `root {
-  function {
-    name {
-      identifier { main }
-    }
-    body {
-      return_stmt {
-        integer { 2 }
-      }
-    }
-  }
-}
+	expected_ast := `root
+└─ function
+    ├─ name
+    │   └─ identifier { main }
+    └─ body
+        └─ return_stmt
+            └─ unary
+                ├─ op { ~ }
+                └─ operand
+                    └─ unary
+                        ├─ op { - }
+                        └─ operand
+                            └─ integer { 2 }
 `
 	s := ast_render(ast)
 	defer delete(s)

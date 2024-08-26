@@ -1,68 +1,72 @@
 package main
 import "core:fmt"
-import "core:os"
 import "core:io"
+import "core:os"
 
 asm_emit :: proc(w: io.Stream, assem: Assembly) {
-    asm_emit_elem(w, assem, 0)
+	asm_emit_root(w, assem.root)
 }
 
-asm_emit_elem :: proc(w: io.Stream, assem: Assembly, asm_idx: Asm_Idx) {
-	asm_node := assem.asm_nodes[asm_idx]
-	switch (asm_node.tag) {
-	// lhs -> function element
-	case .root:
-		asm_emit_root(w, assem, asm_node)
-	// value: name, lhs -> start_subrange, rhs -> end_subrange
-	case .function:
-		asm_emit_function(w, assem, asm_node)
-	// no data
-	case .ins_return:
-		asm_emit_ret(w, assem, asm_node)
-	// lhs -> src, rhs -> dst
-	case .ins_move:
-		asm_emit_mov(w, assem, asm_node)
-	// value -> actual value
-	case .opr_imm:
-		asm_emit_imm(w, assem, asm_node)
-	// always eax for now
-	case .opr_reg:
-		asm_emit_reg(w, assem, asm_node)
+asm_emit_root :: proc(w: io.Stream, root: Asm_Root) {
+	// For macos just emit its contained function
+	asm_emit_function(w, root.function)
+}
+
+asm_emit_function :: proc(w: io.Stream, asm_fn: Asm_Fn) {
+	fmt.wprintf(w, "    .globl _%s\n", asm_fn.name)
+	fmt.wprintf(w, "_%s:\n", asm_fn.name)
+
+	// Function epiloge
+
+	fmt.wprintln(w, "    pushq %rbp")
+	fmt.wprintln(w, "    movq  %rsp, %rbp")
+
+	for inst in asm_fn.insts {
+		asm_emit_instr(w, inst)
 	}
 }
 
-asm_emit_root :: proc(w: io.Stream, assem: Assembly, asm_node: Asm_Node) {
-    // For macos just emit its contained function
-    asm_emit_elem(w, assem, asm_node.lhs)
+asm_emit_instr :: proc(w: io.Stream, inst: Asm_Inst) {
+	fmt.wprint(w, "    ")
+	switch ins in inst {
+	case Asm_Ret:
+		fmt.wprintln(w, "movq  %rbp, %rsp")
+		fmt.wprintln(w, "    popq  %rbp")
+		fmt.wprint(w, "    ret")
+	case Asm_Mov:
+		fmt.wprint(w, "movl  ")
+		asm_emit_operand(w, ins.src)
+		fmt.wprint(w, ", ")
+		asm_emit_operand(w, ins.dst)
+	case Asm_Unary:
+		switch (ins.op) {
+		case .neg:
+			fmt.wprint(w, "negl  ")
+		case .not:
+			fmt.wprint(w, "notl  ")
+		}
+		asm_emit_operand(w, ins.opr)
+	case Asm_Alloc_Stack:
+		fmt.wprintf(w, "subq  $%d, %%rsp", ins.val)
+	}
+	fmt.wprint(w, "\n")
 }
 
-asm_emit_function :: proc(w: io.Stream, assem: Assembly, asm_node: Asm_Node) {
-    name := asm_node.value
-    fmt.wprintf(w, ".globl _%s\n", name)
-    fmt.wprintf(w, "_%s:\n", name)
 
-    for inst_idx in asm_node.lhs..<asm_node.rhs  {
-        asm_emit_elem(w, assem, inst_idx)
-    }
-}
-
-asm_emit_ret :: proc(w: io.Stream, assem: Assembly, asm_node: Asm_Node) {
-    fmt.wprint(w, "ret\n")
-}
-
-asm_emit_mov :: proc(w: io.Stream, assem: Assembly, asm_node: Asm_Node) {
-    fmt.wprint(w, "movl ")
-    asm_emit_elem(w, assem, asm_node.lhs) // emit src
-    fmt.wprint(w, ", ")
-    asm_emit_elem(w, assem, asm_node.rhs) // emit dst
-    fmt.wprint(w, "\n")
-}
-
-// OPERANDS emition
-// The functions below shouldn't add endl when emmiting since they are operands
-asm_emit_imm :: proc(w: io.Stream, assem: Assembly, asm_node: Asm_Node) {
-    fmt.wprintf(w, "$%d", asm_node.value)
-}
-asm_emit_reg :: proc(w: io.Stream, assem: Assembly, asm_node: Asm_Node) {
-    fmt.wprint(w, "%eax")
+asm_emit_operand :: proc(w: io.Stream, operand: Asm_Opr) {
+	switch opr in operand {
+	case Asm_Reg:
+		switch (opr) {
+		case .ax:
+			fmt.wprint(w, "%eax")
+		case .r10:
+			fmt.wprint(w, "%r10d")
+		}
+	case Asm_Imm:
+		fmt.wprintf(w, "$%d", opr.val)
+	case Asm_Pseudo:
+		fmt.wprintf(w, "pseudo(%d)", opr.tmp)
+	case Asm_Stack:
+		fmt.wprintf(w, "%d(%%rbp)", opr.val)
+	}
 }

@@ -36,7 +36,7 @@ Token :: struct {
 
 Lexer :: struct {
 	idx: int,
-	src: []u8,
+	src: string,
 }
 
 lexer_next_token :: proc(l: ^Lexer) -> Token {
@@ -150,7 +150,7 @@ read_byte :: #force_inline proc(l: ^Lexer) -> u8 {
 
 @(test)
 lexer_test :: proc(t: ^testing.T) {
-	test_lexer :: proc(t: ^testing.T, src: []u8, expected: []Token_Tag) {
+	test_lexer :: proc(t: ^testing.T, src: string, expected: []Token_Tag) {
 		lexer := Lexer {
 			idx = 0,
 			src = src,
@@ -170,21 +170,21 @@ lexer_test :: proc(t: ^testing.T) {
 	src: string = " { ( ) } ; "
 	test_lexer(
 		t,
-		transmute([]u8)src,
+		src,
 		[]Token_Tag{.l_brace, .l_paren, .r_paren, .r_brace, .semicolon},
 	)
 
 	src = "`"
 	test_lexer(
 		t,
-		transmute([]u8)src,
+		src,
 		[]Token_Tag{.invalid},
 	)
 
 	src = "-2 --2 -~2 ~2 ~~2"
 	test_lexer(
 		t,
-		transmute([]u8)src,
+		src,
 		[]Token_Tag {
 			.minus,
 			.constant,
@@ -201,22 +201,22 @@ lexer_test :: proc(t: ^testing.T) {
 		},
 	)
 	src = "main other"
-	test_lexer(t, transmute([]u8)src, []Token_Tag{.identifier, .identifier})
+	test_lexer(t, src, []Token_Tag{.identifier, .identifier})
 
 	src = "   {main}   "
-	test_lexer(t, transmute([]u8)src, []Token_Tag{.l_brace, .identifier, .r_brace})
+	test_lexer(t, src, []Token_Tag{.l_brace, .identifier, .r_brace})
 
 	src = "void return int main"
 	test_lexer(
 		t,
-		transmute([]u8)src,
+		src,
 		[]Token_Tag{.keyword_void, .keyword_return, .keyword_int, .identifier},
 	)
 
 	src = "int main(void) { return 2; }"
 	test_lexer(
 		t,
-		transmute([]u8)src,
+		src,
 		[]Token_Tag {
 			.keyword_int,
 			.identifier,
@@ -234,7 +234,7 @@ lexer_test :: proc(t: ^testing.T) {
 	src = "1foo"
 	test_lexer(
 		t,
-		transmute([]u8)src,
+		src,
 		[]Token_Tag {
 		  .invalid,
 		},

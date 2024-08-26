@@ -1,186 +1,175 @@
 package main
 import "core:bytes"
 import "core:fmt"
-import "core:log"
 import "core:os"
 import "core:strconv"
+import "core:strings"
 import "core:testing"
 
 // Owns asm_nodes, extra and errors must free those
 Assembly :: struct {
-	src:       string,
-	tokens:    []Token,
-	asm_nodes: []Asm_Node,
-	extra:     []Asm_Idx,
-	errors:    []Compile_Error,
+	root: Asm_Root,
+}
+
+Asm_Root :: struct {
+	function: Asm_Fn,
+}
+
+Asm_Fn :: struct {
+	// Instructions refer to opers by index
+	name:  string,
+	insts: []Asm_Inst,
+	opers: []Asm_Opr,
 }
 
 asm_deinit :: proc(assm: ^Assembly) {
-	delete(assm.asm_nodes)
-	delete(assm.extra)
-	delete(assm.errors)
+    delete(assm.root.function.opers)
+	delete(assm.root.function.insts)
 }
 
-Asm_Idx :: int
-Asm_Tag :: enum {
-	// lhs -> function element
-	root,
-	// value: name, lhs -> start_subrange, rhs -> end_subrange
-	function,
-	// no data
-	ins_return,
-	// lhs -> src, rhs -> dst
-	ins_move,
-	// value -> actual value
-	opr_imm,
-	// reg no data for now is alway eax
-	opr_reg,
+Asm_Ret :: struct {}
+
+Asm_Unary_Tag :: enum {
+	neg,
+	not,
 }
 
-Asm_Value :: union {
-	int,
-	string,
+Asm_Unary :: struct {
+	op:  Asm_Unary_Tag,
+	opr: Asm_Opr,
+}
+Asm_Mov :: struct {
+	src: Asm_Opr,
+	dst: Asm_Opr,
+}
+Asm_Alloc_Stack :: struct {
+	val: int,
 }
 
-Asm_Node :: struct {
-	tag:   Asm_Tag,
-	value: Asm_Value,
-	lhs:   Asm_Idx,
-	rhs:   Asm_Idx,
+Asm_Inst :: union {
+	Asm_Ret,
+	Asm_Unary,
+	Asm_Mov,
+	Asm_Alloc_Stack,
+}
+
+Asm_Reg :: enum u8 {
+	ax,
+	r10,
+}
+
+Asm_Imm :: struct {
+	val: int,
+}
+
+Asm_Pseudo :: struct {
+	tmp: int,
+}
+
+Asm_Stack :: struct {
+	val: int,
+}
+
+Asm_Opr :: union {
+	Asm_Reg,
+	Asm_Imm,
+	Asm_Pseudo,
+	Asm_Stack,
+}
+
+assembly :: proc(src: string) -> (assem: Assembly, ok: bool) {
+	ta := tacky(src) or_return
+	defer tacky_deinit(&ta)
+	return asm_generate(ta), true
+}
+
+asm_generate :: proc(tacky: Tacky) -> Assembly {
+	asm_fn := asm_gen_fn(tacky.root.function)
+	return Assembly{root = {function = asm_fn}}
 }
 
 // Do not own its data
 Asm_Generator :: struct {
-	n_idx:     Node_Idx,
-	ast:       ^Ast,
-	asm_nodes: [dynamic]Asm_Node,
-	errors:    [dynamic]Compile_Error,
+	tfn:        Tacky_Fn,
+	stack_size: int,
+	opers:      [dynamic]Asm_Opr,
+	insts:      [dynamic]Asm_Inst,
 }
 
-asm_generate :: proc(ast: ^Ast) -> Assembly {
-	generator := Asm_Generator {
-		n_idx     = 0,
-		ast       = ast,
-		asm_nodes = make([dynamic]Asm_Node),
-		errors    = make([dynamic]Compile_Error),
+asm_gen_fn :: proc(tfn: Tacky_Fn) -> Asm_Fn {
+	ag := Asm_Generator {
+		tfn = tfn,
 	}
 
-	asm_gen_root(&generator)
+	asm_append_inst(&ag, Asm_Alloc_Stack{val = 101010})
+	for tinst in tfn.insts {
+		asm_gen_inst(&ag, tinst)
+	}
+	// Fixup the alloc size
+	ag.insts[0] = Asm_Alloc_Stack{ag.stack_size}
 
-	return Assembly {
-		src = ast.src,
-		tokens = ast.tokens,
-		asm_nodes = generator.asm_nodes[:],
-		errors = generator.errors[:],
+	return Asm_Fn{name = tfn.name, opers = ag.opers[:], insts = ag.insts[:]}
+}
+
+asm_gen_inst :: proc(ag: ^Asm_Generator, ti: Tacky_Inst) {
+	switch (ti.tag) {
+	case .ret:
+		tacky_src := ag.tfn.vals[ti.src1]
+		src := tacky_val_to_asm_oper(ag, tacky_src)
+		dst := Asm_Reg{}
+		asm_append_inst(ag, Asm_Mov{src = src, dst = dst})
+		asm_append_inst(ag, Asm_Ret{})
+	case .neg, .comp:
+		tacky_src := ag.tfn.vals[ti.src1]
+		tacky_dst := ag.tfn.vals[ti.dst]
+		src := tacky_val_to_asm_oper(ag, tacky_src)
+		dst := tacky_val_to_asm_oper(ag, tacky_dst)
+		if tacky_src.tag == .var && tacky_dst.tag == .var {
+			// When both are var need to split the function in two movl
+			asm_append_inst(ag, Asm_Mov{src = src, dst = Asm_Reg.r10})
+			asm_append_inst(ag, Asm_Mov{src = Asm_Reg.r10, dst = dst})
+		} else {
+			asm_append_inst(ag, Asm_Mov{src = src, dst = dst})
+		}
+		unary_tag := tacky_unary_to_asm_unary(ti.tag)
+		asm_append_inst(ag, Asm_Unary{op = unary_tag, opr = dst})
 	}
 }
 
-asm_gen_root :: proc(ag: ^Asm_Generator) {
-	root_ast := ag.ast.nodes[0]
-	root_idx := asm_gen_add_node(ag, Asm_Node{tag = .root})
-	child_idx := asm_gen_function(ag, root_ast.lhs)
-	ag.asm_nodes[root_idx].lhs = child_idx
+asm_append_inst :: proc(ag: ^Asm_Generator, inst: Asm_Inst) {
+	append(&ag.insts, inst)
 }
 
-
-asm_process_terminal_value :: proc(ag: ^Asm_Generator, ast_node_idx: Node_Idx) -> Asm_Idx {
-	ast_node := ag.ast.nodes[ast_node_idx]
-	#partial switch (ast_node.tag) {
-	// main_token -> actual value
-	case .exp_integer:
-		return asm_gen_imm(ag, ast_node_idx)
+tacky_unary_to_asm_unary :: proc(tinst: Tacky_Tag) -> Asm_Unary_Tag {
+	#partial switch (tinst) {
+	case .comp:
+		return .not
+	case .neg:
+		return .neg
 	case:
-		assert(false) // Should be unreachable, not processing a terminal value
+		fmt.panicf("Can not convert tacky tag: '%s' into asm unary tag", tinst)
 	}
 
-	assert(false) // Unreachable
-	return -1
+	return {}
 }
 
-asm_gen_function :: proc(ag: ^Asm_Generator, ast_node_idx: Node_Idx) -> Asm_Idx {
-	fn_node := ag.ast.nodes[ast_node_idx]
-	ident_node := ag.ast.nodes[fn_node.lhs]
-	ident_token := ag.ast.tokens[ident_node.main_token]
-	fn_name := ag.ast.src[ident_token.start:ident_token.end]
-	result := asm_gen_add_node(ag, Asm_Node{tag = .function, value = fn_name})
-	stmt_start, stmt_end := asm_process_stmt_node(ag, fn_node.rhs)
-	ag.asm_nodes[result].lhs = stmt_start
-	ag.asm_nodes[result].rhs = stmt_end
-
-	return result
-}
-
-asm_process_stmt_node :: proc(
-	ag: ^Asm_Generator,
-	ast_node_idx: Node_Idx,
-) -> (
-	start: Asm_Idx,
-	end: Asm_Idx,
-) {
-	ast_node := ag.ast.nodes[ast_node_idx]
-	#partial switch (ast_node.tag) {
-	case .stmt_return:
-		return asm_gen_return(ag, ast_node_idx)
-	case:
-		assert(false) // Should be unreachable, not processing a terminal value
+tacky_val_to_asm_oper :: proc(ag: ^Asm_Generator, tval: Tacky_Val) -> Asm_Opr {
+	switch (tval.tag) {
+	case .var:
+	    stack_pos := (tval.val + 1) * 4
+		ag.stack_size = max(ag.stack_size, stack_pos)
+		return Asm_Stack{val = -stack_pos}
+	case .const:
+		return Asm_Imm{val = tval.val}
 	}
 
-	assert(false) // Unreachable
-	return -1, -1
-}
-
-// Generates a set of nodes in the asm tree, returns the start and end of this nodes.
-asm_gen_return :: proc(
-	ag: ^Asm_Generator,
-	ast_node_idx: Node_Idx,
-) -> (
-	start: Asm_Idx,
-	end: Asm_Idx,
-) {
-	ret_node := ag.ast.nodes[ast_node_idx]
-	first := asm_gen_add_node(ag, Asm_Node{tag = .ins_move})
-	last := asm_gen_add_node(ag, Asm_Node{tag = .ins_return})
-
-	op_src := asm_process_terminal_value(ag, ret_node.lhs)
-	op_reg := asm_gen_register_node(ag)
-	ag.asm_nodes[first].lhs = op_src
-	ag.asm_nodes[first].rhs = op_reg
-
-
-	return first, last + 1
-}
-
-asm_gen_imm :: proc(ag: ^Asm_Generator, ast_node_idx: Node_Idx) -> Asm_Idx {
-	int_node := ag.ast.nodes[ast_node_idx]
-	int_token := ag.ast.tokens[int_node.main_token]
-	int_value, ok := strconv.parse_int(ag.ast.src[int_token.start:int_token.end])
-
-	assert(ok)
-	result := asm_gen_add_node(ag, Asm_Node{tag = .opr_imm, value = int_value})
-	return result
-}
-
-asm_gen_register_node :: proc(ag: ^Asm_Generator) -> Asm_Idx {
-	result := asm_gen_add_node(ag, Asm_Node{tag = .opr_reg})
-	return result
-}
-
-
-asm_gen_add_node :: proc(ag: ^Asm_Generator, asm_node: Asm_Node) -> Asm_Idx {
-	result := len(ag.asm_nodes)
-	append(&ag.asm_nodes, asm_node)
-	return result
+	return {}
 }
 
 @(test)
 asm_generator_test :: proc(t: ^testing.T) {
-	// TODO: write a test that can take a string or fd to write the asm output and
-	// compare it.
 	src := "int main(void) { return 2; }"
-	ast := parse(src)
-	defer ast_deinit(&ast)
-
-	assem := asm_generate(&ast)
+	assem, ok := assembly(src)
 	defer asm_deinit(&assem)
 
 	buffer := bytes.Buffer{}
@@ -192,6 +181,5 @@ _main:
 movl $2, %eax
 ret
 `
-
 	testing.expect_value(t, bytes.buffer_to_string(&buffer), expected)
 }

@@ -15,6 +15,11 @@ build:
 	@$(ODIN) build $(BUILD_TARGET) -out:$(OUTPUT_BIN)
 	@echo "Build complete. Binary created at $(OUTPUT_BIN)"
 
+debug:
+	@echo "Building debug c-ompiler..."
+	@$(ODIN) build $(BUILD_TARGET) -debug -out:$(OUTPUT_BIN)
+	@echo "Build complete. Binary created at $(OUTPUT_BIN)"
+
 # Clean target (optional, for removing built files)
 clean:
 	@echo "Cleaning up..."
@@ -22,4 +27,4 @@ clean:
 	@echo "Cleanup complete."
 
 # Phony targets
-.PHONY: all build clean
+.PHONY: all build clean debug
