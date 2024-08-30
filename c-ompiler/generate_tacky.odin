@@ -1,8 +1,8 @@
 package main
+import "core:bytes"
 import "core:fmt"
 import "core:strconv"
 import "core:testing"
-import "core:bytes"
 
 Tacky :: struct {
 	root: Tacky_Root,
@@ -30,6 +30,17 @@ Tacky_Tag :: enum {
 	neg,
 	// src in src1 and dst in dst
 	comp,
+	// src1 and src2 are operands, result goes in dst
+	add,
+	sub,
+	mul,
+	div,
+	rem,
+	shl,
+	shr,
+	and,
+	or,
+	xor,
 }
 
 Tv_Tag :: enum {
@@ -108,6 +119,19 @@ gen_tacky_return :: proc(tg: ^Tacky_Generator, ast_node: Node) {
 	tacky_add_instr(tg, Tacky_Inst{tag = .ret, src1 = val_idx})
 }
 
+tacky_op_from_token: [Token_Tag]Tacky_Tag = #partial {
+	.plus        = .add,
+	.minus       = .sub,
+	.star        = .mul,
+	.slash       = .div,
+	.percent     = .rem,
+	.hat         = .xor,
+	.pipe        = .or,
+	.amp         = .and,
+	.less_less   = .shl,
+	.great_great = .shr,
+}
+
 gen_tacky_expr :: proc(tg: ^Tacky_Generator, ast_node: Node) -> Tacky_Val_Idx {
 	#partial switch (ast_node.tag) {
 	case .exp_integer:
@@ -122,6 +146,15 @@ gen_tacky_expr :: proc(tg: ^Tacky_Generator, ast_node: Node) -> Tacky_Val_Idx {
 		tacky_op := tacky_op_from_ast_op(ast_node.tag)
 		tacky_add_instr(tg, Tacky_Inst{tag = tacky_op, src1 = src, dst = dst})
 		return dst
+	case .exp_binary_op:
+		lhs_node := tg.ast.nodes[ast_node.lhs]
+		rhs_node := tg.ast.nodes[ast_node.rhs]
+		lhs := gen_tacky_expr(tg, lhs_node)
+		rhs := gen_tacky_expr(tg, rhs_node)
+		dst := tacky_make_temporary(tg)
+		op := tacky_op_from_token[tg.ast.tokens[ast_node.main_token].tag]
+		tacky_add_instr(tg, Tacky_Inst{tag = op, src1 = lhs, src2 = rhs, dst = dst})
+		return dst
 	case:
 		fmt.panicf("Unknow expression node %s", ast_node.tag)
 	}
@@ -129,6 +162,7 @@ gen_tacky_expr :: proc(tg: ^Tacky_Generator, ast_node: Node) -> Tacky_Val_Idx {
 	assert(false, "Unreachable")
 	return -1
 }
+
 
 tacky_op_from_ast_op :: proc(node_tag: Node_Tag) -> Tacky_Tag {
 	#partial switch (node_tag) {

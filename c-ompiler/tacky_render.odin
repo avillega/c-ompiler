@@ -18,8 +18,21 @@ tacky_render_fn :: proc(w: io.Stream, fn: Tacky_Fn) {
 	}
 }
 
+op_char : [Tacky_Tag]string = #partial {
+    .add = "+",
+    .mul = "*",
+    .sub = "-",
+    .div = "/",
+    .rem = "%",
+    .xor = "^",
+    .or = "|",
+    .and = "&",
+    .shl = "<<",
+    .shr = ">>",
+}
+
 tacky_render_inst :: proc(w: io.Stream, inst: Tacky_Inst, vals: []Tacky_Val) {
-	switch (inst.tag) {
+	switch inst.tag {
 	case .ret:
 		fmt.wprintf(w, "    ret ")
 		tacky_render_val(w, vals[inst.src1])
@@ -33,6 +46,13 @@ tacky_render_inst :: proc(w: io.Stream, inst: Tacky_Inst, vals: []Tacky_Val) {
 		tacky_render_val(w, vals[inst.dst])
 		fmt.wprintf(w, " = ~")
 		tacky_render_val(w, vals[inst.src1])
+	case .add, .sub, .div, .mul, .rem, .xor, .or, .and, .shl, .shr:
+    	fmt.wprintf(w, "    ")
+    	tacky_render_val(w, vals[inst.dst])
+        fmt.wprintf(w, " = ")
+    	tacky_render_val(w, vals[inst.src1])
+        fmt.wprintf(w, " %s ", op_char[inst.tag])
+    	tacky_render_val(w, vals[inst.src2])
 	}
 	fmt.wprintf(w, "\n")
 }

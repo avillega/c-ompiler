@@ -38,8 +38,35 @@ asm_emit_instr :: proc(w: io.Stream, inst: Asm_Inst) {
 		asm_emit_operand(w, ins.src)
 		fmt.wprint(w, ", ")
 		asm_emit_operand(w, ins.dst)
+	case Asm_Binary:
+		switch ins.op {
+		case .add:
+			fmt.wprint(w, "addl  ")
+		case .sub:
+			fmt.wprint(w, "subl  ")
+		case .mul:
+			fmt.wprint(w, "imull  ")
+		case .or:
+			fmt.wprint(w, "orl  ")
+		case .xor:
+			fmt.wprint(w, "xorl  ")
+		case .and:
+			fmt.wprint(w, "andl  ")
+		case .shl:
+			fmt.wprint(w, "shll  ")
+		case .sar:
+			fmt.wprint(w, "sarl  ")
+		}
+		asm_emit_operand(w, ins.src)
+		fmt.wprint(w, ", ")
+		asm_emit_operand(w, ins.dst)
+	case Asm_Cdq:
+		fmt.wprint(w, "cdq")
+	case Asm_Idiv:
+		fmt.wprint(w, "idivl  ")
+		asm_emit_operand(w, ins.opr)
 	case Asm_Unary:
-		switch (ins.op) {
+		switch ins.op {
 		case .neg:
 			fmt.wprint(w, "negl  ")
 		case .not:
@@ -54,14 +81,17 @@ asm_emit_instr :: proc(w: io.Stream, inst: Asm_Inst) {
 
 
 asm_emit_operand :: proc(w: io.Stream, operand: Asm_Opr) {
+    reprs : [Asm_Reg]string = {
+        .ax = "eax",
+        .dx = "edx",
+        .cx = "ecx",
+        .cl = "cl",
+        .r10 = "r10d",
+        .r11 = "r11d",
+    }
 	switch opr in operand {
 	case Asm_Reg:
-		switch (opr) {
-		case .ax:
-			fmt.wprint(w, "%eax")
-		case .r10:
-			fmt.wprint(w, "%r10d")
-		}
+	   fmt.wprintf(w, "%%%s", reprs[opr])
 	case Asm_Imm:
 		fmt.wprintf(w, "$%d", opr.val)
 	case Asm_Pseudo:

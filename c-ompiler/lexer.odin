@@ -16,6 +16,13 @@ Token_Tag :: enum {
 	star,
 	slash,
 	percent,
+	amp,
+	pipe,
+	hat,
+	less,
+	less_less,
+	great,
+	great_great,
 	minus_minus,
 	identifier,
 	keyword_void,
@@ -53,6 +60,8 @@ lexer_next_token :: proc(l: ^Lexer) -> Token {
 		identifier,
 		minus,
 		constant,
+		less,
+		great,
 	}
 
 	state: State = .start
@@ -107,6 +116,24 @@ lexer_next_token :: proc(l: ^Lexer) -> Token {
 				result.tag = .percent
 				l.idx += 1
 				break loop
+			case '&':
+				result.tag = .amp
+				l.idx += 1
+				break loop
+			case '|':
+				result.tag = .pipe
+				l.idx += 1
+				break loop
+			case '^':
+				result.tag = .hat
+				l.idx += 1
+				break loop
+			case '<':
+				state = .less
+				result.tag = .less
+			case '>':
+				state = .great
+				result.tag = .great
 			case '-':
 				state = .minus
 				result.tag = .minus
@@ -154,6 +181,26 @@ lexer_next_token :: proc(l: ^Lexer) -> Token {
 			case:
 				break loop
 			}
+
+		case .less:
+			switch (c) {
+			case '<':
+				result.tag = .less_less
+				l.idx += 1
+				break loop
+			case:
+				break loop
+			}
+
+		case .great:
+			switch (c) {
+			case '>':
+				result.tag = .great_great
+				l.idx += 1
+				break loop
+			case:
+				break loop
+			}
 		}
 	}
 
@@ -188,7 +235,22 @@ lexer_test :: proc(t: ^testing.T) {
 	}
 
 	src: string = " { ( ) } ; - + * / % "
-	test_lexer(t, src, []Token_Tag{.l_brace, .l_paren, .r_paren, .r_brace, .semicolon, .minus, .plus, .star, .slash, .percent})
+	test_lexer(
+		t,
+		src,
+		[]Token_Tag {
+			.l_brace,
+			.l_paren,
+			.r_paren,
+			.r_brace,
+			.semicolon,
+			.minus,
+			.plus,
+			.star,
+			.slash,
+			.percent,
+		},
+	)
 
 	src = "`"
 	test_lexer(t, src, []Token_Tag{.invalid})
@@ -210,6 +272,29 @@ lexer_test :: proc(t: ^testing.T) {
 			.tilde,
 			.tilde,
 			.constant,
+		},
+	)
+
+	src = "&2 |2 <<2 < <<2 >> > >2 ^xor"
+	test_lexer(
+		t,
+		src,
+		[]Token_Tag {
+			.amp,
+			.constant,
+			.pipe,
+			.constant,
+			.less_less,
+			.constant,
+			.less,
+			.less_less,
+			.constant,
+			.great_great,
+			.great,
+			.great,
+			.constant,
+			.hat,
+			.identifier,
 		},
 	)
 	src = "main other"

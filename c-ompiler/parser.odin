@@ -31,6 +31,8 @@ Node_Tag :: enum {
 	exp_negate_op,
 	// main_token -> operator, lhs -> operand (exp)
 	exp_complement_op,
+	// main_token -> operator, lhs -> operand (exp), rhs -> operand (exp)
+	exp_binary_op,
 	// main_token -> actual value
 	identifier,
 }
@@ -71,7 +73,8 @@ parse :: proc(src: string) -> (ast: Ast, ok: bool) {
 	}
 
 	parse_root(&parser) or_return
-	return Ast{src = src, tokens = tokens[:], nodes = parser.nodes[:], errors = parser.errors[:]}, len(parser.errors) == 0
+	return Ast{src = src, tokens = tokens[:], nodes = parser.nodes[:], errors = parser.errors[:]},
+		len(parser.errors) == 0
 }
 
 parse_root :: proc(p: ^Parser) -> (ok: bool) {
@@ -119,7 +122,7 @@ parse_function_body :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
 }
 
 parse_stmt :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
-	token := parser_peek_token(p)
+	token, token_idx := parser_peek_token(p)
 	#partial switch (token.tag) {
 	case .keyword_return:
 		return parse_return_stmt(p)
@@ -135,14 +138,51 @@ parse_return_stmt :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
 	tokenIdx := parser_expect_token(p, .keyword_return) or_return
 
 	result = parser_append_node(p, Node{tag = .stmt_return, main_token = tokenIdx})
-	expression := parse_expression(p) or_return
+	expression := parse_expression(p, 0) or_return
 	p.nodes[result].lhs = expression
 
 	parser_expect_token(p, .semicolon) or_return
 	return result, true
 }
 
-parse_expression :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
+precedences: [Token_Tag]int = #partial {
+	.pipe        = 2,
+	.hat         = 3,
+	.amp         = 4,
+	.less_less   = 5,
+	.great_great = 5,
+	.plus        = 6,
+	.minus       = 6,
+	.star        = 10,
+	.slash       = 10,
+	.percent     = 10,
+}
+
+is_binary_op :: #force_inline proc(tag: Token_Tag) -> bool {
+	#partial switch tag {
+	case .plus, .minus, .star, .slash, .percent, .pipe, .hat, .amp, .less_less, .great_great:
+		return true
+	case:
+		return false
+	}
+}
+
+parse_expression :: proc(p: ^Parser, min_precedence: int) -> (result: Node_Idx, ok: bool) {
+	left := parse_factor(p) or_return
+	token, token_idx := parser_peek_token(p)
+	for is_binary_op(token.tag) && precedences[token.tag] >= min_precedence {
+		parser_next_token(p)
+		right := parse_expression(p, precedences[token.tag] + 1) or_return
+		left = parser_append_node(
+			p,
+			Node{tag = .exp_binary_op, main_token = token_idx, lhs = left, rhs = right},
+		)
+		token, token_idx = parser_peek_token(p)
+	}
+	return left, true
+}
+
+parse_factor :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
 	token, token_idx := parser_next_token(p)
 
 	#partial switch (token.tag) {
@@ -150,20 +190,20 @@ parse_expression :: proc(p: ^Parser) -> (result: Node_Idx, ok: bool) {
 		result = parser_append_node(p, Node{tag = .exp_integer, main_token = token_idx})
 		return result, true
 	case .l_paren:
-		inner_exp := parse_expression(p) or_return
+		inner_exp := parse_expression(p, 0) or_return
 		parser_expect_token(p, .r_paren) or_return
 		return inner_exp, true
 	case .tilde, .minus:
 		tag: Node_Tag = token.tag == .tilde ? .exp_complement_op : .exp_negate_op
 		result = parser_append_node(p, Node{tag = tag, main_token = token_idx})
-		operand := parse_expression(p) or_return
+		operand := parse_factor(p) or_return
 		p.nodes[result].lhs = operand
 		return result, true
 	case:
 		parser_fail(p) or_return
 	}
 
-	assert(false, "unreachable in parse_expression")
+	assert(false, "unreachable in parse_factor")
 	return result, false
 }
 
@@ -204,13 +244,13 @@ parser_next_token :: proc(p: ^Parser) -> (Token, Token_Idx) {
 }
 
 @(private)
-parser_peek_token :: proc(p: ^Parser) -> Token {
+parser_peek_token :: proc(p: ^Parser) -> (Token, Token_Idx) {
 	if (p.t_idx < len(p.tokens)) {
 		result := p.tokens[p.t_idx]
-		return result
+		return result, p.t_idx
 	}
 
-	return p.tokens[len(p.tokens) - 1]
+	return p.tokens[len(p.tokens) - 1], len(p.tokens) - 1
 }
 
 @(test)

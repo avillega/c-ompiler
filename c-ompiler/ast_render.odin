@@ -9,7 +9,6 @@ ast_render :: proc(ast: Ast) -> string {
 	return strings.to_string(sb)
 }
 
-
 ast_render_root :: proc(ast: Ast, sb: ^strings.Builder) {
 	root_node := ast.nodes[0]
 	strings.write_string(sb, "root\n")
@@ -41,6 +40,8 @@ ast_render_element :: proc(
 		ast_render_identifier(ast, node_idx, indentation, sb, extra_pipe)
 	case .exp_negate_op, .exp_complement_op:
 		ast_render_unary(ast, node_idx, indentation, sb, extra_pipe)
+	case .exp_binary_op:
+	   ast_render_binary(ast, node_idx, indentation, sb, extra_pipe)
 	}
 }
 
@@ -111,6 +112,30 @@ ast_render_unary :: proc(
 	indent(sb, indentation + 1, true)
 	strings.write_string(sb, "operand\n")
 	ast_render_element(ast, node.lhs, indentation + 2, sb)
+}
+
+ast_render_binary :: proc(
+	ast: Ast,
+	node_idx: Node_Idx,
+	indentation: int,
+	sb: ^strings.Builder,
+	extra_pipe := false,
+) {
+	// main_token -> actual value
+	node := ast.nodes[node_idx]
+	token := ast.tokens[node.main_token]
+	indent(sb, indentation, true)
+	strings.write_string(sb, "binary\n")
+	indent(sb, indentation + 1)
+	strings.write_string(sb, "op { ")
+	strings.write_string(sb, ast.src[token.start:token.end])
+	strings.write_string(sb, " }\n")
+	indent(sb, indentation + 1, true)
+	strings.write_string(sb, "lhs\n")
+	ast_render_element(ast, node.lhs, indentation + 2, sb)
+	indent(sb, indentation + 1, true)
+	strings.write_string(sb, "rhs\n")
+	ast_render_element(ast, node.rhs, indentation + 2, sb)
 }
 
 ast_render_identifier :: proc(
